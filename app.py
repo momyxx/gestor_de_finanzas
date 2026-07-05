@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import uuid
 from datetime import date
 
 
@@ -8,9 +9,13 @@ CATEGORIAS_BASE = ["Comidas", "Transporte", "Ocio", "Hogar", "Otros"]
 ARCHIVO_DATOS = "transacciones.csv"
 ARCHIVO_CATEGORIAS = "categorias.csv"
 
+COLUMNAS_TRANSACCION = ["descripcion", "cantidad", "fecha", "categoria", "tipo"]
+ANCHOS_COLUMNAS_TABLA = [3, 1.5, 1.5, 1.5, 1.5, 0.6]
+
 
 class Transaccion:
     def __init__(self, descripcion, cantidad, fecha, categoria, tipo):
+        self.id = str(uuid.uuid4())
         self.descripcion = descripcion
         self.cantidad = cantidad
         self.fecha = fecha
@@ -144,7 +149,7 @@ class Cartera:
     def cargar(archivo):
         try:
             df = pd.read_csv(archivo)
-        except Exception:
+        except (FileNotFoundError, pd.errors.EmptyDataError, pd.errors.ParserError):
             return Cartera([])
 
         filas = df.to_dict("records")
@@ -177,7 +182,7 @@ def guardar_categorias():
 def cargar_categorias():
     try:
         df = pd.read_csv(ARCHIVO_CATEGORIAS)
-    except Exception:
+    except (FileNotFoundError, pd.errors.EmptyDataError, pd.errors.ParserError):
         return list(CATEGORIAS_BASE)
 
     categorias_cargadas = []
@@ -213,11 +218,15 @@ def mostrar_formulario():
         tipo_movimiento = st.radio("Tipo", ["Ingreso", "Gasto"], horizontal=True)
         enviado = st.form_submit_button("Enviar")
 
-    if enviado == True:
-        if cantidad <= 0:
+    if enviado:
+        if not descripcion.strip():
+            st.error("La descripción no puede estar vacía.")
+        elif cantidad <= 0:
             st.error("La cantidad debe ser mayor que 0.")
+        elif not categoria:
+            st.error("Debes seleccionar una categoría.")
         else:
-            transaccion = Transaccion(descripcion, cantidad, fecha, categoria, tipo_movimiento)
+            transaccion = Transaccion(descripcion.strip(), cantidad, fecha, categoria, tipo_movimiento)
             st.session_state.cartera.agregar_transaccion(transaccion)
 
             st.success("Transacción agregada con éxito")
@@ -243,19 +252,18 @@ def importar_csv():
 
             try:
                 df = pd.read_csv(archivo)
-            except Exception:
+            except (pd.errors.EmptyDataError, pd.errors.ParserError, UnicodeDecodeError):
                 st.error("El archivo no es un CSV válido.")
                 return
 
-            columnas_esperadas = ["descripcion", "cantidad", "fecha", "categoria", "tipo"]
             columnas_faltantes = []
 
-            for columna in columnas_esperadas:
+            for columna in COLUMNAS_TRANSACCION:
                 if columna not in df.columns:
                     columnas_faltantes.append(columna)
 
             if columnas_faltantes:
-                st.error(f"El CSV debe contener las columnas: {', '.join(columnas_esperadas)}")
+                st.error(f"El CSV debe contener las columnas: {', '.join(COLUMNAS_TRANSACCION)}")
                 return
 
             filas = df.to_dict("records")
@@ -331,7 +339,7 @@ def mostrar_transacciones(cartera):
             unsafe_allow_html=True,
         )
 
-        encabezado = st.columns([3, 1.5, 1.5, 1.5, 1.5, 0.6])
+        encabezado = st.columns(ANCHOS_COLUMNAS_TABLA)
         encabezado[0].markdown("**Descripción**")
         encabezado[1].markdown("**Cantidad**")
         encabezado[2].markdown("**Fecha**")
@@ -339,15 +347,17 @@ def mostrar_transacciones(cartera):
         encabezado[4].markdown("**Tipo**")
 
         for t in cartera.transacciones:
-            with st.container(key=f"fila-{id(t)}"):
-                fila = st.columns([3, 1.5, 1.5, 1.5, 1.5, 0.6])
+            identificador_fila = getattr(t, "id", None) or id(t)
+
+            with st.container(key=f"fila-{identificador_fila}"):
+                fila = st.columns(ANCHOS_COLUMNAS_TABLA)
                 fila[0].write(t.descripcion)
                 fila[1].write(f"{t.cantidad:.2f}€")
                 fila[2].write(t.fecha)
                 fila[3].write(t.categoria)
                 fila[4].write(t.tipo)
 
-                if fila[5].button("🗑️", key=f"eliminar-{id(t)}", help="Eliminar esta transacción"):
+                if fila[5].button("🗑️", key=f"eliminar-{identificador_fila}", help="Eliminar esta transacción"):
                     st.session_state.cartera.eliminar_transaccion(t)
 
         df = cartera.to_dataframe()
