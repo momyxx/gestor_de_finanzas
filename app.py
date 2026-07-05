@@ -3,9 +3,10 @@ import pandas as pd
 from datetime import date
 
 
-categorias = ["Comidas", "Transporte", "Ocio", "Hogar", "Otros"]
+CATEGORIAS_BASE = ["Comidas", "Transporte", "Ocio", "Hogar", "Otros"]
 
 ARCHIVO_DATOS = "transacciones.csv"
+ARCHIVO_CATEGORIAS = "categorias.csv"
 
 
 class Transaccion:
@@ -40,6 +41,9 @@ class Cartera:
 
     def agregar_transaccion(self, transaccion):
         self.transacciones.append(transaccion)
+
+    def eliminar_transaccion(self, transaccion):
+        self.transacciones.remove(transaccion)
 
     def esta_vacia(self):
         return len(self.transacciones) == 0
@@ -165,9 +169,39 @@ def mostrar_titulos():
     st.caption("Versión 1.0")
 
 
+def guardar_categorias():
+    df = pd.DataFrame({"categoria": st.session_state.categorias})
+    df.to_csv(ARCHIVO_CATEGORIAS, index=False)
+
+
+def cargar_categorias():
+    try:
+        df = pd.read_csv(ARCHIVO_CATEGORIAS)
+    except Exception:
+        return list(CATEGORIAS_BASE)
+
+    categorias_cargadas = []
+    for categoria in df["categoria"]:
+        categorias_cargadas.append(categoria)
+
+    return categorias_cargadas
+
+
 def inicializar_estado():
     if "cartera" not in st.session_state:
         st.session_state.cartera = Cartera.cargar(ARCHIVO_DATOS)
+
+    if "categorias" not in st.session_state:
+        st.session_state.categorias = cargar_categorias()
+
+
+def agregar_categoria_nueva():
+    nueva_categoria_limpia = st.session_state.input_nueva_categoria.strip()
+
+    if nueva_categoria_limpia and nueva_categoria_limpia not in st.session_state.categorias:
+        st.session_state.categorias.append(nueva_categoria_limpia)
+
+    st.session_state.input_nueva_categoria = ""
 
 
 def mostrar_formulario():
@@ -175,15 +209,22 @@ def mostrar_formulario():
         descripcion = st.text_input("Descripción del gasto o ingreso: ", placeholder="Ej: descripción de la operación")
         cantidad = st.number_input("Cantidad", step=1.0, min_value=0.0, format="%0.2f")
         fecha = st.date_input("Fecha")
-        categoria = st.selectbox("Categoría", categorias, index=None, placeholder="")
+        categoria = st.selectbox("Categoría", st.session_state.categorias, index=None, placeholder="")
         tipo_movimiento = st.radio("Tipo", ["Ingreso", "Gasto"], horizontal=True)
         enviado = st.form_submit_button("Enviar")
 
     if enviado == True:
-        transaccion = Transaccion(descripcion, cantidad, fecha, categoria, tipo_movimiento)
-        st.session_state.cartera.agregar_transaccion(transaccion)
+        if cantidad <= 0:
+            st.error("La cantidad debe ser mayor que 0.")
+        else:
+            transaccion = Transaccion(descripcion, cantidad, fecha, categoria, tipo_movimiento)
+            st.session_state.cartera.agregar_transaccion(transaccion)
 
-        st.success("Transacción agregada con éxito")
+            st.success("Transacción agregada con éxito")
+
+    with st.expander("Añadir nueva categoría"):
+        st.text_input("Nueva categoría", key="input_nueva_categoria")
+        st.button("+ Añadir", on_click=agregar_categoria_nueva)
 
 
 def importar_csv():
@@ -235,7 +276,7 @@ def importar_csv():
 
 
 def mostrar_filtros():
-    categorias_seleccionadas = st.multiselect("Categorías", categorias, default=categorias)
+    categorias_seleccionadas = st.multiselect("Categorías", st.session_state.categorias, default=st.session_state.categorias)
 
     rango_fechas = st.session_state.cartera.obtener_rango_fechas()
 
@@ -255,9 +296,61 @@ def mostrar_transacciones(cartera):
     st.subheader("Transacciones registradas:")
 
     if not cartera.esta_vacia():
-        df = cartera.to_dataframe()
-        st.dataframe(df)
+        st.markdown(
+            """
+            <style>
+            div[class*="st-key-fila-"] button {
+                opacity: 0;
+                transition: opacity 0.15s ease-in-out;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background-color: transparent;
+                padding: 0;
+            }
+            div[class*="st-key-fila-"] button div[data-testid="stMarkdownContainer"] {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 100%;
+                height: 100%;
+            }
+            div[class*="st-key-fila-"] button p {
+                margin: 0;
+                padding: 0;
+                line-height: 1;
+            }
+            div[class*="st-key-fila-"]:hover button {
+                opacity: 1;
+            }
+            div[class*="st-key-fila-"] button:hover {
+                background-color: #ff4b4b;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
+        encabezado = st.columns([3, 1.5, 1.5, 1.5, 1.5, 0.6])
+        encabezado[0].markdown("**Descripción**")
+        encabezado[1].markdown("**Cantidad**")
+        encabezado[2].markdown("**Fecha**")
+        encabezado[3].markdown("**Categoría**")
+        encabezado[4].markdown("**Tipo**")
+
+        for t in cartera.transacciones:
+            with st.container(key=f"fila-{id(t)}"):
+                fila = st.columns([3, 1.5, 1.5, 1.5, 1.5, 0.6])
+                fila[0].write(t.descripcion)
+                fila[1].write(f"{t.cantidad:.2f}€")
+                fila[2].write(t.fecha)
+                fila[3].write(t.categoria)
+                fila[4].write(t.tipo)
+
+                if fila[5].button("🗑️", key=f"eliminar-{id(t)}", help="Eliminar esta transacción"):
+                    st.session_state.cartera.eliminar_transaccion(t)
+
+        df = cartera.to_dataframe()
         csv_datos = df.to_csv(index=False)
         st.download_button(
             "Descargar transacciones",
@@ -346,3 +439,4 @@ with tab_analisis:
     mostrar_analisis(cartera_filtrada)
 
 st.session_state.cartera.guardar(ARCHIVO_DATOS)
+guardar_categorias()
